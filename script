@@ -46,6 +46,15 @@ local Settings = {
         FOV = 200,
         ShowFOV = true,
         VisibilityCheck = true
+    },
+    SilentAim = {
+        Enabled = false,
+        TeamCheck = true,
+        TargetPart = "Head",
+        FOV = 200,
+        ShowFOV = false,
+        VisibilityCheck = true,
+        HitChance = 100
     }
 }
 
@@ -55,13 +64,28 @@ local ESPObjects = {}
 local ChamsObjects = {}
 local currentTarget = nil
 local FOVCircle = nil
+local SilentFOVCircle = nil
 local menuOpen = false
+local silentAimTarget = nil
+
+-- Cache frequently used services and values
+local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local math_clamp = math.clamp
+local math_floor = math.floor
+local math_huge = math.huge
+local table_find = table.find
+local string_format = string.format
+local Vector2_new = Vector2.new
+local Vector3_new = Vector3.new
+local Color3_fromRGB = Color3.fromRGB
 
 -- Menu categories
 local categories = {
     {name = "Combat", icon = "⚔️", expanded = true},
-    {name = "Visuals", icon = "👁️", expanded = true},
-    {name = "Aimbot", icon = "🎯", expanded = true}
+    {name = "Aimbot", icon = "🎯", expanded = true},
+    {name = "SilentAim", icon = "🔫", expanded = true},
+    {name = "Visuals", icon = "👁️", expanded = true}
 }
 
 local menuItems = {
@@ -70,6 +94,24 @@ local menuItems = {
         {name = "Cooldown", key = "AutoClick.Cooldown", type = "slider", min = 0.05, max = 1, format = "%.2fs"},
         {name = "Team Check", key = "AutoClick.TeamCheck", type = "toggle"},
         {name = "Max Distance", key = "AutoClick.MaxDistance", type = "slider", min = 100, max = 2000, format = "%.0f"}
+    },
+    Aimbot = {
+        {name = "Enable", key = "Aimbot.Enabled", type = "toggle"},
+        {name = "Team Check", key = "Aimbot.TeamCheck", type = "toggle"},
+        {name = "Target Part", key = "Aimbot.TargetPart", type = "dropdown", values = {"Head", "UpperTorso", "HumanoidRootPart"}},
+        {name = "Smoothness", key = "Aimbot.Smoothness", type = "slider", min = 0, max = 1, format = "%.1f"},
+        {name = "FOV", key = "Aimbot.FOV", type = "slider", min = 50, max = 500, format = "%.0f"},
+        {name = "Show FOV", key = "Aimbot.ShowFOV", type = "toggle"},
+        {name = "Visibility Check", key = "Aimbot.VisibilityCheck", type = "toggle"}
+    },
+    SilentAim = {
+        {name = "Enable", key = "SilentAim.Enabled", type = "toggle"},
+        {name = "Team Check", key = "SilentAim.TeamCheck", type = "toggle"},
+        {name = "Target Part", key = "SilentAim.TargetPart", type = "dropdown", values = {"Head", "UpperTorso", "HumanoidRootPart"}},
+        {name = "FOV", key = "SilentAim.FOV", type = "slider", min = 50, max = 500, format = "%.0f"},
+        {name = "Show FOV", key = "SilentAim.ShowFOV", type = "toggle"},
+        {name = "Visibility Check", key = "SilentAim.VisibilityCheck", type = "toggle"},
+        {name = "Hit Chance", key = "SilentAim.HitChance", type = "slider", min = 0, max = 100, format = "%.0f%%"}
     },
     Visuals = {
         {name = "Enable ESP", key = "ESP.Enabled", type = "toggle"},
@@ -80,15 +122,6 @@ local menuItems = {
         {name = "Skeleton", key = "ESP.Skeleton", type = "toggle"},
         {name = "Chams", key = "ESP.Chams", type = "toggle"},
         {name = "Thickness", key = "ESP.Thickness", type = "slider", min = 1, max = 5, format = "%.0f"}
-    },
-    Aimbot = {
-        {name = "Enable", key = "Aimbot.Enabled", type = "toggle"},
-        {name = "Team Check", key = "Aimbot.TeamCheck", type = "toggle"},
-        {name = "Target Part", key = "Aimbot.TargetPart", type = "dropdown", values = {"Head", "UpperTorso", "HumanoidRootPart"}},
-        {name = "Smoothness", key = "Aimbot.Smoothness", type = "slider", min = 0, max = 1, format = "%.1f"},
-        {name = "FOV", key = "Aimbot.FOV", type = "slider", min = 50, max = 500, format = "%.0f"},
-        {name = "Show FOV", key = "Aimbot.ShowFOV", type = "toggle"},
-        {name = "Visibility Check", key = "Aimbot.VisibilityCheck", type = "toggle"}
     }
 }
 
@@ -181,20 +214,28 @@ local function createUI()
     contentFrame.BackgroundTransparency = 1
     contentFrame.Parent = mainFrame
     
-    -- Left column
-    local leftColumn = Instance.new("Frame")
+    -- Left column (Combat + Aimbot)
+    local leftColumn = Instance.new("ScrollingFrame")
     leftColumn.Name = "LeftColumn"
     leftColumn.Size = UDim2.new(0.48, 0, 1, 0)
     leftColumn.Position = UDim2.new(0, 0, 0, 0)
     leftColumn.BackgroundTransparency = 1
+    leftColumn.BorderSizePixel = 0
+    leftColumn.ScrollBarThickness = 4
+    leftColumn.CanvasSize = UDim2.new(0, 0, 0, 0)
+    leftColumn.AutomaticCanvasSize = Enum.AutomaticSize.Y
     leftColumn.Parent = contentFrame
     
-    -- Right column
-    local rightColumn = Instance.new("Frame")
+    -- Right column (SilentAim + Visuals)
+    local rightColumn = Instance.new("ScrollingFrame")
     rightColumn.Name = "RightColumn"
     rightColumn.Size = UDim2.new(0.48, 0, 1, 0)
     rightColumn.Position = UDim2.new(0.52, 0, 0, 0)
     rightColumn.BackgroundTransparency = 1
+    rightColumn.BorderSizePixel = 0
+    rightColumn.ScrollBarThickness = 4
+    rightColumn.CanvasSize = UDim2.new(0, 0, 0, 0)
+    rightColumn.AutomaticCanvasSize = Enum.AutomaticSize.Y
     rightColumn.Parent = contentFrame
     
     -- Create category sections
@@ -204,6 +245,17 @@ local function createUI()
     for catIndex, category in ipairs(categories) do
         local parentColumn = columnIndex == 1 and leftColumn or rightColumn
         local items = menuItems[category.name]
+        
+        if not items then continue end
+        
+        -- Category header
+        local categoryFrame = Instance.new("Frame")
+        categoryFrame.Name = category.name
+        categoryFrame.Size = UDim2.new(1, 0, 0, 35)
+        categoryFrame.Position = UDim2.new(0, 0, 0, yOffset)
+        categoryFrame.BackgroundColor3 = Color3_fromRGB(25, 25, 25)
+        categoryFrame.BorderSizePixel = 0
+        categoryFrame.Parent = parentColumn
         
         -- Category header
         local categoryFrame = Instance.new("Frame")
@@ -338,6 +390,8 @@ local function createUI()
                     
                     sliderBtn.MouseButton1Down:Connect(function()
                         dragging = true
+                        local mousePos = UserInputService:GetMouseLocation()
+                        updateSlider(mousePos)
                     end)
                     
                     UserInputService.InputEnded:Connect(function(input)
@@ -396,10 +450,17 @@ local function createUI()
         
         yOffset = yOffset + 5
         
-        -- Switch to right column after Combat
+        -- Switch columns properly
         if catIndex == 1 then
+            -- After Combat, move to right column for Aimbot
             columnIndex = 2
             yOffset = 0
+        elseif catIndex == 2 then
+            -- After Aimbot, stay on right for SilentAim (just increment yOffset)
+            columnIndex = 2
+        elseif catIndex == 3 then
+            -- After SilentAim, stay on right for Visuals
+            columnIndex = 2
         end
     end
     
@@ -516,28 +577,40 @@ local function isValidEnemy(instance, checkTeam)
     return true, player, character
 end
 
--- Chams system
+-- Chams system (optimized)
 local function createChams(player)
     if ChamsObjects[player] then return end
-    
     ChamsObjects[player] = {}
 end
 
 local function removeChams(player)
     if not ChamsObjects[player] then return end
     
-    for _, highlight in pairs(ChamsObjects[player]) do
-        if highlight then highlight:Destroy() end
+    local chams = ChamsObjects[player]
+    if chams.Highlight then 
+        chams.Highlight:Destroy() 
     end
     ChamsObjects[player] = nil
 end
 
 local function updateChams()
+    if not Settings.ESP.Enabled or not Settings.ESP.Chams then
+        -- Clear all chams when disabled
+        for player, chams in pairs(ChamsObjects) do
+            if chams.Highlight then
+                chams.Highlight:Destroy()
+                ChamsObjects[player] = nil
+            end
+        end
+        return
+    end
+    
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
-            local isEnemy = isValidEnemy(player.Character:FindFirstChild("HumanoidRootPart"), Settings.ESP.TeamCheck)
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            local isEnemy = hrp and isValidEnemy(hrp, Settings.ESP.TeamCheck)
             
-            if Settings.ESP.Enabled and Settings.ESP.Chams and isEnemy then
+            if isEnemy then
                 if not ChamsObjects[player] or not ChamsObjects[player].Highlight then
                     createChams(player)
                     
@@ -624,8 +697,12 @@ local function updateESP()
         return
     end
     
+    local localChar = LocalPlayer.Character
+    local localHRP = localChar and localChar:FindFirstChild("HumanoidRootPart")
+    
     for player, esp in pairs(ESPObjects) do
-        if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        local char = player.Character
+        if not char or not char:FindFirstChild("HumanoidRootPart") then
             for _, line in pairs(esp.Lines) do
                 line.Visible = false
             end
@@ -635,7 +712,7 @@ local function updateESP()
             continue
         end
         
-        local isEnemy = isValidEnemy(player.Character.HumanoidRootPart, Settings.ESP.TeamCheck)
+        local isEnemy = isValidEnemy(char.HumanoidRootPart, Settings.ESP.TeamCheck)
         if not isEnemy then
             for _, line in pairs(esp.Lines) do
                 line.Visible = false
@@ -646,24 +723,28 @@ local function updateESP()
             continue
         end
         
-        local char = player.Character
         local hrp = char.HumanoidRootPart
         local humanoid = char:FindFirstChildOfClass("Humanoid")
         
-        local distance = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") 
-            and (LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude or 0
+        local distance = localHRP and (localHRP.Position - hrp.Position).Magnitude or 0
         
         local espColor = Settings.ESP.Color
+        local thickness = Settings.ESP.Thickness
         
         for _, line in pairs(esp.Lines) do
             line.Color = espColor
-            line.Thickness = Settings.ESP.Thickness
+            line.Thickness = thickness
         end
         
+        -- Cache body parts lookup
+        local Head = char:FindFirstChild("Head")
+        local UpperTorso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+        local LowerTorso = char:FindFirstChild("LowerTorso") or UpperTorso
+        
         local parts = {
-            Head = char:FindFirstChild("Head"),
-            UpperTorso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"),
-            LowerTorso = char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso"),
+            Head = Head,
+            UpperTorso = UpperTorso,
+            LowerTorso = LowerTorso,
             LeftUpperArm = char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("Left Arm"),
             LeftLowerArm = char:FindFirstChild("LeftLowerArm") or char:FindFirstChild("Left Arm"),
             RightUpperArm = char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm"),
@@ -695,15 +776,18 @@ local function updateESP()
             {parts.RightLowerLeg, parts.RightFoot}
         }
         
+        -- Draw skeleton lines
         for i, connection in ipairs(connections) do
             local line = esp.Lines[i]
-            if connection[1] and connection[2] then
-                local pos1, onScreen1 = Camera:WorldToViewportPoint(connection[1].Position)
-                local pos2, onScreen2 = Camera:WorldToViewportPoint(connection[2].Position)
+            local part1, part2 = connection[1], connection[2]
+            
+            if part1 and part2 then
+                local pos1, onScreen1 = Camera:WorldToViewportPoint(part1.Position)
+                local pos2, onScreen2 = Camera:WorldToViewportPoint(part2.Position)
                 
                 if onScreen1 and onScreen2 then
-                    line.From = Vector2.new(pos1.X, pos1.Y)
-                    line.To = Vector2.new(pos2.X, pos2.Y)
+                    line.From = Vector2_new(pos1.X, pos1.Y)
+                    line.To = Vector2_new(pos2.X, pos2.Y)
                     line.Visible = true
                 else
                     line.Visible = false
@@ -713,13 +797,14 @@ local function updateESP()
             end
         end
         
-        if parts.Head then
-            local headPos, onScreen = Camera:WorldToViewportPoint(parts.Head.Position + Vector3.new(0, 1, 0))
+        -- Update text displays
+        if Head then
+            local headPos, onScreen = Camera:WorldToViewportPoint(Head.Position + Vector3_new(0, 1, 0))
             local yOffset = 0
             
             if onScreen then
                 if Settings.ESP.ShowNames then
-                    esp.NameText.Position = Vector2.new(headPos.X, headPos.Y + yOffset)
+                    esp.NameText.Position = Vector2_new(headPos.X, headPos.Y + yOffset)
                     esp.NameText.Text = player.Name
                     esp.NameText.Color = espColor
                     esp.NameText.Visible = true
@@ -729,10 +814,11 @@ local function updateESP()
                 end
                 
                 if Settings.ESP.ShowHealth and humanoid then
-                    esp.HealthText.Position = Vector2.new(headPos.X, headPos.Y + yOffset)
-                    esp.HealthText.Text = string.format("[%.0f HP]", humanoid.Health)
-                    local healthPercent = humanoid.Health / humanoid.MaxHealth
-                    esp.HealthText.Color = Color3.fromRGB(
+                    local health = humanoid.Health
+                    local healthPercent = health / humanoid.MaxHealth
+                    esp.HealthText.Position = Vector2_new(headPos.X, headPos.Y + yOffset)
+                    esp.HealthText.Text = string_format("[%.0f HP]", health)
+                    esp.HealthText.Color = Color3_fromRGB(
                         255 * (1 - healthPercent),
                         255 * healthPercent,
                         0
@@ -744,8 +830,8 @@ local function updateESP()
                 end
                 
                 if Settings.ESP.ShowDistance then
-                    esp.DistanceText.Position = Vector2.new(headPos.X, headPos.Y + yOffset)
-                    esp.DistanceText.Text = string.format("[%.0f studs]", distance)
+                    esp.DistanceText.Position = Vector2_new(headPos.X, headPos.Y + yOffset)
+                    esp.DistanceText.Text = string_format("[%.0f studs]", distance)
                     esp.DistanceText.Color = espColor
                     esp.DistanceText.Visible = true
                 else
@@ -763,14 +849,19 @@ end
 -- Aimbot
 local function isVisible(targetPart)
     if not Settings.Aimbot.VisibilityCheck then return true end
-    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then return false end
     
-    local origin = LocalPlayer.Character.Head.Position
+    local localChar = LocalPlayer.Character
+    if not localChar then return false end
+    
+    local head = localChar:FindFirstChild("Head")
+    if not head then return false end
+    
+    local origin = head.Position
     local direction = (targetPart.Position - origin)
     
     local raycastParams = RaycastParams.new()
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    raycastParams.FilterDescendantsInstances = {localChar, Camera}
     raycastParams.IgnoreWater = true
     
     local rayResult = Workspace:Raycast(origin, direction, raycastParams)
@@ -784,43 +875,44 @@ local function isVisible(targetPart)
 end
 
 local function getClosestTarget()
-    local closestDistance = math.huge
-    local closestPlayer = nil
+    local closestDistance = math_huge
     local closestPart = nil
     
-    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local screenCenter = Vector2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local fov = Settings.Aimbot.FOV
+    local targetPartName = Settings.Aimbot.TargetPart
+    local checkTeam = Settings.Aimbot.TeamCheck
     
     for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer and player.Character then
-            local character = player.Character
-            local targetPartName = Settings.Aimbot.TargetPart
+        if player == LocalPlayer then continue end
+        
+        local character = player.Character
+        if not character then continue end
+        
+        local targetPart = character:FindFirstChild(targetPartName)
+        if not targetPart and targetPartName == "UpperTorso" then
+            targetPart = character:FindFirstChild("Torso")
+        end
+        
+        if targetPart then
+            local isEnemy = isValidEnemy(targetPart, checkTeam)
             
-            local targetPart = character:FindFirstChild(targetPartName)
-            if not targetPart and targetPartName == "UpperTorso" then
-                targetPart = character:FindFirstChild("Torso")
-            end
-            
-            if targetPart then
-                local isEnemy = isValidEnemy(targetPart, Settings.Aimbot.TeamCheck)
+            if isEnemy and isVisible(targetPart) then
+                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
                 
-                if isEnemy and isVisible(targetPart) then
-                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                if onScreen then
+                    local distance = (Vector2_new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
                     
-                    if onScreen then
-                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
-                        
-                        if distance < Settings.Aimbot.FOV and distance < closestDistance then
-                            closestDistance = distance
-                            closestPlayer = player
-                            closestPart = targetPart
-                        end
+                    if distance < fov and distance < closestDistance then
+                        closestDistance = distance
+                        closestPart = targetPart
                     end
                 end
             end
         end
     end
     
-    return closestPlayer, closestPart
+    return closestPart
 end
 
 local function updateAimbot()
@@ -829,63 +921,186 @@ local function updateAimbot()
         return
     end
     
-    local targetPlayer, targetPart = getClosestTarget()
+    local targetPart = getClosestTarget()
     currentTarget = targetPart
     
-    if targetPart and LocalPlayer.Character then
-        -- Get exact center of the target part (hitbox center)
-        local targetPosition = targetPart.Position
-        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPosition)
+    if not targetPart then return end
+    
+    local targetPosition = targetPart.Position
+    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPosition)
+    
+    if not onScreen then return end
+    
+    local screenCenter = Vector2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local targetScreenPos = Vector2_new(screenPos.X, screenPos.Y)
+    local difference = targetScreenPos - screenCenter
+    
+    if difference.Magnitude <= 1 then return end
+    
+    local smoothness = Settings.Aimbot.Smoothness
+    local adjustedDiff = difference * (1 - smoothness)
+    
+    -- Try mousemoverel first (fastest)
+    if mousemoverel then
+        mousemoverel(adjustedDiff.X, adjustedDiff.Y)
+        return
+    end
+    
+    -- Try mousemoveabs
+    if mousemoveabs then
+        mousemoveabs(targetScreenPos.X, targetScreenPos.Y)
+        return
+    end
+    
+    -- Fallback to VirtualInputManager
+    VirtualInputManager:SendMouseMoveEvent(targetScreenPos.X, targetScreenPos.Y, game)
+end
+
+local function createFOVCircle()
+
+-- Create Silent Aim FOV Circle
+local function createSilentFOVCircle()
+    if SilentFOVCircle then SilentFOVCircle:Remove() end
+    
+    SilentFOVCircle = Drawing.new("Circle")
+    SilentFOVCircle.Thickness = 2
+    SilentFOVCircle.NumSides = 64
+    SilentFOVCircle.Radius = Settings.SilentAim.FOV
+    SilentFOVCircle.Color = Color3_fromRGB(255, 100, 100)
+    SilentFOVCircle.Transparency = 0.5
+    SilentFOVCircle.Visible = Settings.SilentAim.ShowFOV and Settings.SilentAim.Enabled
+    SilentFOVCircle.Position = Vector2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end
+
+createSilentFOVCircle()
+
+local function updateSilentFOVCircle()
+    if not SilentFOVCircle then return end
+    
+    SilentFOVCircle.Visible = Settings.SilentAim.ShowFOV and Settings.SilentAim.Enabled
+    SilentFOVCircle.Radius = Settings.SilentAim.FOV
+    SilentFOVCircle.Position = Vector2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    SilentFOVCircle.Color = silentAimTarget and Color3_fromRGB(255, 0, 0) or Color3_fromRGB(255, 100, 100)
+end
+
+-- Silent Aim System (Rivals-Specific) - IMPROVED v2
+local function getSilentAimTarget()
+    if not Settings.SilentAim.Enabled then 
+        silentAimTarget = nil
+        return nil 
+    end
+    
+    -- Hit chance check with proper settings access
+    local hitChance = Settings.SilentAim.HitChance or 100
+    if math.random(1, 100) > hitChance then
+        silentAimTarget = nil
+        return nil
+    end
+    
+    local closestDistance = math_huge
+    local closestPart = nil
+    
+    local screenCenter = Vector2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local fov = Settings.SilentAim.FOV or 200
+    local targetPartName = Settings.SilentAim.TargetPart or "Head"
+    local checkTeam = Settings.SilentAim.TeamCheck
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
         
-        if onScreen then
-            -- Calculate screen center (crosshair position)
-            local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-            local targetScreenPos = Vector2.new(screenPos.X, screenPos.Y)
+        local character = player.Character
+        if not character then continue end
+        
+        local targetPart = character:FindFirstChild(targetPartName)
+        if not targetPart and targetPartName == "UpperTorso" then
+            targetPart = character:FindFirstChild("Torso")
+        end
+        
+        if targetPart then
+            local isEnemy = isValidEnemy(targetPart, checkTeam)
             
-            -- Calculate difference between crosshair and target
-            local difference = targetScreenPos - screenCenter
-            
-            -- Check if we're close enough to consider "on target"
-            local distanceFromCenter = difference.Magnitude
-            
-            -- Always track if more than 1 pixel away from dead center
-            if distanceFromCenter > 1 then
-                -- Apply smoothness
-                local smoothness = Settings.Aimbot.Smoothness
-                local adjustedDiff = difference * (1 - smoothness)
-                
-                -- Use mousemoverel for relative movement (best method)
-                local moved = false
-                pcall(function()
-                    if mousemoverel then
-                        mousemoverel(adjustedDiff.X, adjustedDiff.Y)
-                        moved = true
-                    end
-                end)
-                
-                -- Fallback: mousemoveabs for absolute positioning
-                if not moved then
-                    pcall(function()
-                        if mousemoveabs then
-                            mousemoveabs(targetScreenPos.X, targetScreenPos.Y)
-                            moved = true
-                        end
-                    end)
+            if isEnemy then
+                -- Visibility check
+                if Settings.SilentAim.VisibilityCheck and not isVisible(targetPart) then
+                    continue
                 end
                 
-                -- Last resort: VirtualInputManager
-                if not moved then
-                    pcall(function()
-                        local VIM = game:GetService("VirtualInputManager")
-                        VIM:SendMouseMoveEvent(targetScreenPos.X, targetScreenPos.Y, game)
-                    end)
+                local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                
+                if onScreen then
+                    local distance = (Vector2_new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    
+                    if distance < fov and distance < closestDistance then
+                        closestDistance = distance
+                        closestPart = targetPart
+                    end
                 end
             end
         end
     end
+    
+    silentAimTarget = closestPart
+    return closestPart
 end
 
-local function createFOVCircle()
+-- Silent Aim via Camera + Mouse Manipulation
+local isShooting = false
+local originalCFrame = nil
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if not Settings.SilentAim.Enabled then return end
+    
+    -- Detect left click (primary fire)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local silentTarget = getSilentAimTarget()
+        
+        if silentTarget then
+            isShooting = true
+            silentAimTarget = silentTarget
+            
+            -- Store original camera
+            originalCFrame = Camera.CFrame
+            
+            -- Calculate target position
+            local targetPos = silentTarget.Position
+            
+            -- Snap camera instantly
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+            
+            -- Also move mouse for additional compatibility
+            pcall(function()
+                local screenPos = Camera:WorldToViewportPoint(targetPos)
+                if mousemoveabs then
+                    mousemoveabs(screenPos.X, screenPos.Y)
+                end
+            end)
+            
+            -- Restore after a very short delay
+            task.spawn(function()
+                task.wait(0.02) -- Reduced to 0.02 for faster snap
+                if originalCFrame then
+                    Camera.CFrame = originalCFrame
+                end
+                isShooting = false
+                silentAimTarget = nil
+            end)
+        else
+            silentAimTarget = nil
+        end
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if originalCFrame then
+            Camera.CFrame = originalCFrame
+            originalCFrame = nil
+        end
+        isShooting = false
+        silentAimTarget = nil
+    end
+end)
     if FOVCircle then FOVCircle:Remove() end
     
     FOVCircle = Drawing.new("Circle")
@@ -901,12 +1116,12 @@ end
 createFOVCircle()
 
 local function updateFOVCircle()
-    if FOVCircle then
-        FOVCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled
-        FOVCircle.Radius = Settings.Aimbot.FOV
-        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-        FOVCircle.Color = currentTarget and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
-    end
+    if not FOVCircle then return end
+    
+    FOVCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled
+    FOVCircle.Radius = Settings.Aimbot.FOV
+    FOVCircle.Position = Vector2_new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Color = currentTarget and Color3_fromRGB(255, 0, 0) or Color3_fromRGB(255, 255, 255)
 end
 
 -- Player management
