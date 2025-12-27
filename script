@@ -1,0 +1,968 @@
+-- Roblox Combat Script with Modern UI
+-- Features: Auto-Click, ESP (Skeleton + Chams), Aimbot
+
+-- Load anticheat bypass
+pcall(function()
+    loadstring(game:HttpGet("https://github.com/benzonati/Rivals-Anticheat-Bypass/raw/refs/heads/main/main.luau"))()
+end)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Configuration
+local Settings = {
+    AutoClick = {
+        Enabled = true,
+        Cooldown = 0.1,
+        TeamCheck = true,
+        MaxDistance = 1000,
+        ActivateTool = true
+    },
+    ESP = {
+        Enabled = true,
+        TeamCheck = true,
+        ShowNames = true,
+        ShowDistance = true,
+        ShowHealth = true,
+        Skeleton = true,
+        Chams = false,
+        Thickness = 2,
+        Color = Color3.fromRGB(255, 255, 255),
+        TeamColor = Color3.fromRGB(0, 255, 0),
+        ChamsColor = Color3.fromRGB(138, 43, 226),
+        ChamsTransparency = 0.5
+    },
+    Aimbot = {
+        Enabled = false,
+        TeamCheck = true,
+        TargetPart = "Head",
+        Smoothness = 0.5,
+        FOV = 200,
+        ShowFOV = true,
+        VisibilityCheck = true
+    }
+}
+
+-- State
+local lastClickTime = 0
+local ESPObjects = {}
+local ChamsObjects = {}
+local currentTarget = nil
+local FOVCircle = nil
+local menuOpen = false
+
+-- Menu categories
+local categories = {
+    {name = "Combat", icon = "⚔️", expanded = true},
+    {name = "Visuals", icon = "👁️", expanded = true},
+    {name = "Aimbot", icon = "🎯", expanded = true}
+}
+
+local menuItems = {
+    Combat = {
+        {name = "Enable", key = "AutoClick.Enabled", type = "toggle"},
+        {name = "Cooldown", key = "AutoClick.Cooldown", type = "slider", min = 0.05, max = 1, format = "%.2fs"},
+        {name = "Team Check", key = "AutoClick.TeamCheck", type = "toggle"},
+        {name = "Max Distance", key = "AutoClick.MaxDistance", type = "slider", min = 100, max = 2000, format = "%.0f"}
+    },
+    Visuals = {
+        {name = "Enable ESP", key = "ESP.Enabled", type = "toggle"},
+        {name = "Team Check", key = "ESP.TeamCheck", type = "toggle"},
+        {name = "Show Names", key = "ESP.ShowNames", type = "toggle"},
+        {name = "Show Distance", key = "ESP.ShowDistance", type = "toggle"},
+        {name = "Show Health", key = "ESP.ShowHealth", type = "toggle"},
+        {name = "Skeleton", key = "ESP.Skeleton", type = "toggle"},
+        {name = "Chams", key = "ESP.Chams", type = "toggle"},
+        {name = "Thickness", key = "ESP.Thickness", type = "slider", min = 1, max = 5, format = "%.0f"}
+    },
+    Aimbot = {
+        {name = "Enable", key = "Aimbot.Enabled", type = "toggle"},
+        {name = "Team Check", key = "Aimbot.TeamCheck", type = "toggle"},
+        {name = "Target Part", key = "Aimbot.TargetPart", type = "dropdown", values = {"Head", "UpperTorso", "HumanoidRootPart"}},
+        {name = "Smoothness", key = "Aimbot.Smoothness", type = "slider", min = 0, max = 1, format = "%.1f"},
+        {name = "FOV", key = "Aimbot.FOV", type = "slider", min = 50, max = 500, format = "%.0f"},
+        {name = "Show FOV", key = "Aimbot.ShowFOV", type = "toggle"},
+        {name = "Visibility Check", key = "Aimbot.VisibilityCheck", type = "toggle"}
+    }
+}
+
+-- Get/Set settings
+local function getSetting(key)
+    local keys = string.split(key, ".")
+    local value = Settings
+    for _, k in ipairs(keys) do
+        value = value[k]
+    end
+    return value
+end
+
+local function setSetting(key, value)
+    local keys = string.split(key, ".")
+    local setting = Settings
+    for i = 1, #keys - 1 do
+        setting = setting[keys[i]]
+    end
+    setting[keys[#keys]] = value
+end
+
+-- Create modern UI
+local function createUI()
+    local screenGui = LocalPlayer.PlayerGui:FindFirstChild("ModernCombatUI")
+    if screenGui then screenGui:Destroy() end
+    
+    screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "ModernCombatUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    screenGui.Parent = LocalPlayer.PlayerGui
+    
+    -- Main container
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 700, 0, 500)
+    mainFrame.Position = UDim2.new(0.5, -350, 0.5, -250)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+    
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, 8)
+    mainCorner.Parent = mainFrame
+    
+    -- Top bar
+    local topBar = Instance.new("Frame")
+    topBar.Name = "TopBar"
+    topBar.Size = UDim2.new(1, 0, 0, 40)
+    topBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    topBar.BorderSizePixel = 0
+    topBar.Parent = mainFrame
+    
+    local topCorner = Instance.new("UICorner")
+    topCorner.CornerRadius = UDim.new(0, 8)
+    topCorner.Parent = topBar
+    
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(0, 200, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "APEX"
+    title.Font = Enum.Font.GothamBold
+    title.TextSize = 20
+    title.TextColor3 = Color3.fromRGB(100, 200, 255)
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = topBar
+    
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 40, 0, 40)
+    closeBtn.Position = UDim2.new(1, -40, 0, 0)
+    closeBtn.BackgroundTransparency = 1
+    closeBtn.Text = "✕"
+    closeBtn.Font = Enum.Font.GothamBold
+    closeBtn.TextSize = 18
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.Parent = topBar
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        menuOpen = false
+        screenGui:Destroy()
+    end)
+    
+    -- Container for columns
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Name = "Content"
+    contentFrame.Size = UDim2.new(1, -20, 1, -50)
+    contentFrame.Position = UDim2.new(0, 10, 0, 45)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Parent = mainFrame
+    
+    -- Left column
+    local leftColumn = Instance.new("Frame")
+    leftColumn.Name = "LeftColumn"
+    leftColumn.Size = UDim2.new(0.48, 0, 1, 0)
+    leftColumn.Position = UDim2.new(0, 0, 0, 0)
+    leftColumn.BackgroundTransparency = 1
+    leftColumn.Parent = contentFrame
+    
+    -- Right column
+    local rightColumn = Instance.new("Frame")
+    rightColumn.Name = "RightColumn"
+    rightColumn.Size = UDim2.new(0.48, 0, 1, 0)
+    rightColumn.Position = UDim2.new(0.52, 0, 0, 0)
+    rightColumn.BackgroundTransparency = 1
+    rightColumn.Parent = contentFrame
+    
+    -- Create category sections
+    local yOffset = 0
+    local columnIndex = 1
+    
+    for catIndex, category in ipairs(categories) do
+        local parentColumn = columnIndex == 1 and leftColumn or rightColumn
+        local items = menuItems[category.name]
+        
+        -- Category header
+        local categoryFrame = Instance.new("Frame")
+        categoryFrame.Name = category.name
+        categoryFrame.Size = UDim2.new(1, 0, 0, 35)
+        categoryFrame.Position = UDim2.new(0, 0, 0, yOffset)
+        categoryFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        categoryFrame.BorderSizePixel = 0
+        categoryFrame.Parent = parentColumn
+        
+        local catCorner = Instance.new("UICorner")
+        catCorner.CornerRadius = UDim.new(0, 6)
+        catCorner.Parent = categoryFrame
+        
+        local catLabel = Instance.new("TextLabel")
+        catLabel.Size = UDim2.new(1, -15, 1, 0)
+        catLabel.Position = UDim2.new(0, 12, 0, 0)
+        catLabel.BackgroundTransparency = 1
+        catLabel.Text = category.icon .. " " .. category.name
+        catLabel.Font = Enum.Font.GothamBold
+        catLabel.TextSize = 14
+        catLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        catLabel.TextXAlignment = Enum.TextXAlignment.Left
+        catLabel.Parent = categoryFrame
+        
+        yOffset = yOffset + 40
+        
+        -- Items
+        if items then
+            for _, item in ipairs(items) do
+                local itemFrame = Instance.new("Frame")
+                itemFrame.Name = item.name
+                itemFrame.Size = UDim2.new(1, 0, 0, item.type == "slider" and 50 or 30)
+                itemFrame.Position = UDim2.new(0, 0, 0, yOffset)
+                itemFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+                itemFrame.BorderSizePixel = 0
+                itemFrame.Parent = parentColumn
+                
+                local itemCorner = Instance.new("UICorner")
+                itemCorner.CornerRadius = UDim.new(0, 4)
+                itemCorner.Parent = itemFrame
+                
+                local itemLabel = Instance.new("TextLabel")
+                itemLabel.Size = UDim2.new(0.6, 0, 0, 30)
+                itemLabel.Position = UDim2.new(0, 12, 0, 0)
+                itemLabel.BackgroundTransparency = 1
+                itemLabel.Text = item.name
+                itemLabel.Font = Enum.Font.Gotham
+                itemLabel.TextSize = 12
+                itemLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+                itemLabel.TextXAlignment = Enum.TextXAlignment.Left
+                itemLabel.Parent = itemFrame
+                
+                -- Toggle
+                if item.type == "toggle" then
+                    local toggleBtn = Instance.new("TextButton")
+                    toggleBtn.Size = UDim2.new(0, 45, 0, 20)
+                    toggleBtn.Position = UDim2.new(1, -55, 0, 5)
+                    toggleBtn.BackgroundColor3 = getSetting(item.key) and Color3.fromRGB(60, 180, 100) or Color3.fromRGB(50, 50, 50)
+                    toggleBtn.Text = ""
+                    toggleBtn.Parent = itemFrame
+                    
+                    local toggleCorner = Instance.new("UICorner")
+                    toggleCorner.CornerRadius = UDim.new(1, 0)
+                    toggleCorner.Parent = toggleBtn
+                    
+                    local toggleCircle = Instance.new("Frame")
+                    toggleCircle.Size = UDim2.new(0, 16, 0, 16)
+                    toggleCircle.Position = getSetting(item.key) and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+                    toggleCircle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+                    toggleCircle.BorderSizePixel = 0
+                    toggleCircle.Parent = toggleBtn
+                    
+                    local circleCorner = Instance.new("UICorner")
+                    circleCorner.CornerRadius = UDim.new(1, 0)
+                    circleCorner.Parent = toggleCircle
+                    
+                    toggleBtn.MouseButton1Click:Connect(function()
+                        local newValue = not getSetting(item.key)
+                        setSetting(item.key, newValue)
+                        
+                        toggleBtn.BackgroundColor3 = newValue and Color3.fromRGB(60, 180, 100) or Color3.fromRGB(50, 50, 50)
+                        TweenService:Create(toggleCircle, TweenInfo.new(0.2), {
+                            Position = newValue and UDim2.new(1, -18, 0.5, -8) or UDim2.new(0, 2, 0.5, -8)
+                        }):Play()
+                    end)
+                
+                -- Slider
+                elseif item.type == "slider" then
+                    local currentValue = getSetting(item.key)
+                    local percentage = (currentValue - item.min) / (item.max - item.min)
+                    
+                    local valueLabel = Instance.new("TextLabel")
+                    valueLabel.Size = UDim2.new(0.3, 0, 0, 30)
+                    valueLabel.Position = UDim2.new(0.65, 0, 0, 0)
+                    valueLabel.BackgroundTransparency = 1
+                    valueLabel.Text = string.format(item.format, currentValue)
+                    valueLabel.Font = Enum.Font.GothamBold
+                    valueLabel.TextSize = 12
+                    valueLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
+                    valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+                    valueLabel.Parent = itemFrame
+                    
+                    local sliderBg = Instance.new("Frame")
+                    sliderBg.Size = UDim2.new(1, -24, 0, 4)
+                    sliderBg.Position = UDim2.new(0, 12, 1, -15)
+                    sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+                    sliderBg.BorderSizePixel = 0
+                    sliderBg.Parent = itemFrame
+                    
+                    local sliderBgCorner = Instance.new("UICorner")
+                    sliderBgCorner.CornerRadius = UDim.new(1, 0)
+                    sliderBgCorner.Parent = sliderBg
+                    
+                    local sliderFill = Instance.new("Frame")
+                    sliderFill.Size = UDim2.new(percentage, 0, 1, 0)
+                    sliderFill.BackgroundColor3 = Color3.fromRGB(100, 200, 255)
+                    sliderFill.BorderSizePixel = 0
+                    sliderFill.Parent = sliderBg
+                    
+                    local sliderFillCorner = Instance.new("UICorner")
+                    sliderFillCorner.CornerRadius = UDim.new(1, 0)
+                    sliderFillCorner.Parent = sliderFill
+                    
+                    local sliderBtn = Instance.new("TextButton")
+                    sliderBtn.Size = UDim2.new(1, 0, 1, 0)
+                    sliderBtn.BackgroundTransparency = 1
+                    sliderBtn.Text = ""
+                    sliderBtn.Parent = sliderBg
+                    
+                    local dragging = false
+                    
+                    sliderBtn.MouseButton1Down:Connect(function()
+                        dragging = true
+                    end)
+                    
+                    UserInputService.InputEnded:Connect(function(input)
+                        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                            dragging = false
+                        end
+                    end)
+                    
+                    sliderBtn.MouseMoved:Connect(function(x, y)
+                        if dragging then
+                            local pos = math.clamp((x - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+                            local newValue = item.min + (item.max - item.min) * pos
+                            
+                            -- Round to step if needed
+                            if item.max - item.min <= 10 then
+                                newValue = math.floor(newValue * 20 + 0.5) / 20
+                            end
+                            
+                            setSetting(item.key, newValue)
+                            sliderFill.Size = UDim2.new(pos, 0, 1, 0)
+                            valueLabel.Text = string.format(item.format, newValue)
+                        end
+                    end)
+                
+                -- Dropdown
+                elseif item.type == "dropdown" then
+                    local currentValue = getSetting(item.key)
+                    
+                    local dropdownBtn = Instance.new("TextButton")
+                    dropdownBtn.Size = UDim2.new(0.35, 0, 0, 22)
+                    dropdownBtn.Position = UDim2.new(0.62, 0, 0, 4)
+                    dropdownBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+                    dropdownBtn.Text = currentValue
+                    dropdownBtn.Font = Enum.Font.Gotham
+                    dropdownBtn.TextSize = 11
+                    dropdownBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+                    dropdownBtn.Parent = itemFrame
+                    
+                    local dropCorner = Instance.new("UICorner")
+                    dropCorner.CornerRadius = UDim.new(0, 4)
+                    dropCorner.Parent = dropdownBtn
+                    
+                    dropdownBtn.MouseButton1Click:Connect(function()
+                        local currentIndex = table.find(item.values, currentValue)
+                        local nextIndex = (currentIndex % #item.values) + 1
+                        local newValue = item.values[nextIndex]
+                        
+                        setSetting(item.key, newValue)
+                        dropdownBtn.Text = newValue
+                    end)
+                end
+                
+                yOffset = yOffset + (item.type == "slider" and 55 or 35)
+            end
+        end
+        
+        yOffset = yOffset + 5
+        
+        -- Switch to right column after Combat
+        if catIndex == 1 then
+            columnIndex = 2
+            yOffset = 0
+        end
+    end
+    
+    -- Make draggable
+    local dragging, dragInput, dragStart, startPos
+    
+    topBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+        end
+    end)
+    
+    topBar.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            dragInput = input
+        end
+    end)
+    
+    RunService.Heartbeat:Connect(function()
+        if dragging and dragInput then
+            local delta = dragInput.Position - dragStart
+            mainFrame.Position = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
+-- Toggle menu
+UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
+    
+    if input.KeyCode == Enum.KeyCode.Insert then
+        menuOpen = not menuOpen
+        if menuOpen then
+            createUI()
+        else
+            local screenGui = LocalPlayer.PlayerGui:FindFirstChild("ModernCombatUI")
+            if screenGui then screenGui:Destroy() end
+        end
+    end
+end)
+
+-- Combat functions
+local function getEquippedTool()
+    if LocalPlayer.Character then
+        return LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    end
+    return nil
+end
+
+local function simulateClick()
+    if Settings.AutoClick.ActivateTool then
+        local tool = getEquippedTool()
+        if tool then
+            pcall(function() tool:Activate() end)
+        end
+    end
+    
+    pcall(function()
+        if mouse1click then mouse1click() end
+    end)
+    
+    pcall(function()
+        if mouse1press and mouse1release then
+            mouse1press()
+            task.wait(0.05)
+            mouse1release()
+        end
+    end)
+    
+    pcall(function()
+        local VU = game:GetService("VirtualUser")
+        VU:CaptureController()
+        VU:Button1Down(Vector2.new(0, 0))
+        task.wait(0.05)
+        VU:Button1Up(Vector2.new(0, 0))
+    end)
+end
+
+local function isValidEnemy(instance, checkTeam)
+    if not instance then return false end
+    
+    local character = instance:FindFirstAncestorOfClass("Model")
+    if not character then return false end
+    
+    local player = Players:GetPlayerFromCharacter(character)
+    if not player then return false end
+    
+    if player == LocalPlayer then return false end
+    
+    if checkTeam and LocalPlayer.Team and player.Team then
+        if player.Team == LocalPlayer.Team then
+            return false
+        end
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then
+        return false
+    end
+    
+    return true, player, character
+end
+
+-- Chams system
+local function createChams(player)
+    if ChamsObjects[player] then return end
+    
+    ChamsObjects[player] = {}
+end
+
+local function removeChams(player)
+    if not ChamsObjects[player] then return end
+    
+    for _, highlight in pairs(ChamsObjects[player]) do
+        if highlight then highlight:Destroy() end
+    end
+    ChamsObjects[player] = nil
+end
+
+local function updateChams()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local isEnemy = isValidEnemy(player.Character:FindFirstChild("HumanoidRootPart"), Settings.ESP.TeamCheck)
+            
+            if Settings.ESP.Enabled and Settings.ESP.Chams and isEnemy then
+                if not ChamsObjects[player] or not ChamsObjects[player].Highlight then
+                    createChams(player)
+                    
+                    local highlight = Instance.new("Highlight")
+                    highlight.Adornee = player.Character
+                    highlight.FillColor = Settings.ESP.ChamsColor
+                    highlight.OutlineColor = Settings.ESP.ChamsColor
+                    highlight.FillTransparency = Settings.ESP.ChamsTransparency
+                    highlight.OutlineTransparency = 0
+                    highlight.Parent = player.Character
+                    
+                    ChamsObjects[player] = {Highlight = highlight}
+                end
+            else
+                if ChamsObjects[player] and ChamsObjects[player].Highlight then
+                    ChamsObjects[player].Highlight:Destroy()
+                    ChamsObjects[player] = nil
+                end
+            end
+        end
+    end
+end
+
+-- ESP System
+local function createLine()
+    local line = Drawing.new("Line")
+    line.Visible = false
+    line.Thickness = Settings.ESP.Thickness
+    line.Color = Settings.ESP.Color
+    line.Transparency = 1
+    return line
+end
+
+local function createText()
+    local text = Drawing.new("Text")
+    text.Visible = false
+    text.Center = true
+    text.Outline = true
+    text.Font = 2
+    text.Size = 13
+    text.Color = Color3.fromRGB(255, 255, 255)
+    return text
+end
+
+local function createESP(player)
+    if ESPObjects[player] then return end
+    
+    local esp = {
+        Lines = {},
+        NameText = createText(),
+        DistanceText = createText(),
+        HealthText = createText()
+    }
+    
+    for i = 1, 15 do
+        esp.Lines[i] = createLine()
+    end
+    
+    ESPObjects[player] = esp
+end
+
+local function removeESP(player)
+    if not ESPObjects[player] then return end
+    
+    for _, line in pairs(ESPObjects[player].Lines) do
+        line:Remove()
+    end
+    ESPObjects[player].NameText:Remove()
+    ESPObjects[player].DistanceText:Remove()
+    ESPObjects[player].HealthText:Remove()
+    ESPObjects[player] = nil
+end
+
+local function updateESP()
+    if not Settings.ESP.Enabled or not Settings.ESP.Skeleton then
+        for _, esp in pairs(ESPObjects) do
+            for _, line in pairs(esp.Lines) do
+                line.Visible = false
+            end
+            esp.NameText.Visible = false
+            esp.DistanceText.Visible = false
+            esp.HealthText.Visible = false
+        end
+        return
+    end
+    
+    for player, esp in pairs(ESPObjects) do
+        if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+            for _, line in pairs(esp.Lines) do
+                line.Visible = false
+            end
+            esp.NameText.Visible = false
+            esp.DistanceText.Visible = false
+            esp.HealthText.Visible = false
+            continue
+        end
+        
+        local isEnemy = isValidEnemy(player.Character.HumanoidRootPart, Settings.ESP.TeamCheck)
+        if not isEnemy then
+            for _, line in pairs(esp.Lines) do
+                line.Visible = false
+            end
+            esp.NameText.Visible = false
+            esp.DistanceText.Visible = false
+            esp.HealthText.Visible = false
+            continue
+        end
+        
+        local char = player.Character
+        local hrp = char.HumanoidRootPart
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
+        
+        local distance = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") 
+            and (LocalPlayer.Character.HumanoidRootPart.Position - hrp.Position).Magnitude or 0
+        
+        local espColor = Settings.ESP.Color
+        
+        for _, line in pairs(esp.Lines) do
+            line.Color = espColor
+            line.Thickness = Settings.ESP.Thickness
+        end
+        
+        local parts = {
+            Head = char:FindFirstChild("Head"),
+            UpperTorso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso"),
+            LowerTorso = char:FindFirstChild("LowerTorso") or char:FindFirstChild("Torso"),
+            LeftUpperArm = char:FindFirstChild("LeftUpperArm") or char:FindFirstChild("Left Arm"),
+            LeftLowerArm = char:FindFirstChild("LeftLowerArm") or char:FindFirstChild("Left Arm"),
+            RightUpperArm = char:FindFirstChild("RightUpperArm") or char:FindFirstChild("Right Arm"),
+            RightLowerArm = char:FindFirstChild("RightLowerArm") or char:FindFirstChild("Right Arm"),
+            LeftUpperLeg = char:FindFirstChild("LeftUpperLeg") or char:FindFirstChild("Left Leg"),
+            LeftLowerLeg = char:FindFirstChild("LeftLowerLeg") or char:FindFirstChild("Left Leg"),
+            RightUpperLeg = char:FindFirstChild("RightUpperLeg") or char:FindFirstChild("Right Leg"),
+            RightLowerLeg = char:FindFirstChild("RightLowerLeg") or char:FindFirstChild("Right Leg"),
+            LeftHand = char:FindFirstChild("LeftHand"),
+            RightHand = char:FindFirstChild("RightHand"),
+            LeftFoot = char:FindFirstChild("LeftFoot"),
+            RightFoot = char:FindFirstChild("RightFoot")
+        }
+        
+        local connections = {
+            {parts.Head, parts.UpperTorso},
+            {parts.UpperTorso, parts.LowerTorso},
+            {parts.UpperTorso, parts.LeftUpperArm},
+            {parts.LeftUpperArm, parts.LeftLowerArm},
+            {parts.LeftLowerArm, parts.LeftHand},
+            {parts.UpperTorso, parts.RightUpperArm},
+            {parts.RightUpperArm, parts.RightLowerArm},
+            {parts.RightLowerArm, parts.RightHand},
+            {parts.LowerTorso, parts.LeftUpperLeg},
+            {parts.LeftUpperLeg, parts.LeftLowerLeg},
+            {parts.LeftLowerLeg, parts.LeftFoot},
+            {parts.LowerTorso, parts.RightUpperLeg},
+            {parts.RightUpperLeg, parts.RightLowerLeg},
+            {parts.RightLowerLeg, parts.RightFoot}
+        }
+        
+        for i, connection in ipairs(connections) do
+            local line = esp.Lines[i]
+            if connection[1] and connection[2] then
+                local pos1, onScreen1 = Camera:WorldToViewportPoint(connection[1].Position)
+                local pos2, onScreen2 = Camera:WorldToViewportPoint(connection[2].Position)
+                
+                if onScreen1 and onScreen2 then
+                    line.From = Vector2.new(pos1.X, pos1.Y)
+                    line.To = Vector2.new(pos2.X, pos2.Y)
+                    line.Visible = true
+                else
+                    line.Visible = false
+                end
+            else
+                line.Visible = false
+            end
+        end
+        
+        if parts.Head then
+            local headPos, onScreen = Camera:WorldToViewportPoint(parts.Head.Position + Vector3.new(0, 1, 0))
+            local yOffset = 0
+            
+            if onScreen then
+                if Settings.ESP.ShowNames then
+                    esp.NameText.Position = Vector2.new(headPos.X, headPos.Y + yOffset)
+                    esp.NameText.Text = player.Name
+                    esp.NameText.Color = espColor
+                    esp.NameText.Visible = true
+                    yOffset = yOffset + 15
+                else
+                    esp.NameText.Visible = false
+                end
+                
+                if Settings.ESP.ShowHealth and humanoid then
+                    esp.HealthText.Position = Vector2.new(headPos.X, headPos.Y + yOffset)
+                    esp.HealthText.Text = string.format("[%.0f HP]", humanoid.Health)
+                    local healthPercent = humanoid.Health / humanoid.MaxHealth
+                    esp.HealthText.Color = Color3.fromRGB(
+                        255 * (1 - healthPercent),
+                        255 * healthPercent,
+                        0
+                    )
+                    esp.HealthText.Visible = true
+                    yOffset = yOffset + 15
+                else
+                    esp.HealthText.Visible = false
+                end
+                
+                if Settings.ESP.ShowDistance then
+                    esp.DistanceText.Position = Vector2.new(headPos.X, headPos.Y + yOffset)
+                    esp.DistanceText.Text = string.format("[%.0f studs]", distance)
+                    esp.DistanceText.Color = espColor
+                    esp.DistanceText.Visible = true
+                else
+                    esp.DistanceText.Visible = false
+                end
+            else
+                esp.NameText.Visible = false
+                esp.DistanceText.Visible = false
+                esp.HealthText.Visible = false
+            end
+        end
+    end
+end
+
+-- Aimbot
+local function isVisible(targetPart)
+    if not Settings.Aimbot.VisibilityCheck then return true end
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("Head") then return false end
+    
+    local origin = LocalPlayer.Character.Head.Position
+    local direction = (targetPart.Position - origin)
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    raycastParams.IgnoreWater = true
+    
+    local rayResult = Workspace:Raycast(origin, direction, raycastParams)
+    
+    if rayResult then
+        local hitCharacter = rayResult.Instance:FindFirstAncestorOfClass("Model")
+        return hitCharacter == targetPart.Parent
+    end
+    
+    return true
+end
+
+local function getClosestTarget()
+    local closestDistance = math.huge
+    local closestPlayer = nil
+    local closestPart = nil
+    
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local character = player.Character
+            local targetPartName = Settings.Aimbot.TargetPart
+            
+            local targetPart = character:FindFirstChild(targetPartName)
+            if not targetPart and targetPartName == "UpperTorso" then
+                targetPart = character:FindFirstChild("Torso")
+            end
+            
+            if targetPart then
+                local isEnemy = isValidEnemy(targetPart, Settings.Aimbot.TeamCheck)
+                
+                if isEnemy and isVisible(targetPart) then
+                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
+                    
+                    if onScreen then
+                        local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                        
+                        if distance < Settings.Aimbot.FOV and distance < closestDistance then
+                            closestDistance = distance
+                            closestPlayer = player
+                            closestPart = targetPart
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return closestPlayer, closestPart
+end
+
+local function updateAimbot()
+    if not Settings.Aimbot.Enabled then
+        currentTarget = nil
+        return
+    end
+    
+    local targetPlayer, targetPart = getClosestTarget()
+    currentTarget = targetPart
+    
+    if targetPart and LocalPlayer.Character then
+        -- Get exact center of the target part (hitbox center)
+        local targetPosition = targetPart.Position
+        local screenPos, onScreen = Camera:WorldToViewportPoint(targetPosition)
+        
+        if onScreen then
+            -- Calculate screen center (crosshair position)
+            local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+            local targetScreenPos = Vector2.new(screenPos.X, screenPos.Y)
+            
+            -- Calculate difference between crosshair and target
+            local difference = targetScreenPos - screenCenter
+            
+            -- Check if we're close enough to consider "on target"
+            local distanceFromCenter = difference.Magnitude
+            
+            -- Always track if more than 1 pixel away from dead center
+            if distanceFromCenter > 1 then
+                -- Apply smoothness
+                local smoothness = Settings.Aimbot.Smoothness
+                local adjustedDiff = difference * (1 - smoothness)
+                
+                -- Use mousemoverel for relative movement (best method)
+                local moved = false
+                pcall(function()
+                    if mousemoverel then
+                        mousemoverel(adjustedDiff.X, adjustedDiff.Y)
+                        moved = true
+                    end
+                end)
+                
+                -- Fallback: mousemoveabs for absolute positioning
+                if not moved then
+                    pcall(function()
+                        if mousemoveabs then
+                            mousemoveabs(targetScreenPos.X, targetScreenPos.Y)
+                            moved = true
+                        end
+                    end)
+                end
+                
+                -- Last resort: VirtualInputManager
+                if not moved then
+                    pcall(function()
+                        local VIM = game:GetService("VirtualInputManager")
+                        VIM:SendMouseMoveEvent(targetScreenPos.X, targetScreenPos.Y, game)
+                    end)
+                end
+            end
+        end
+    end
+end
+
+local function createFOVCircle()
+    if FOVCircle then FOVCircle:Remove() end
+    
+    FOVCircle = Drawing.new("Circle")
+    FOVCircle.Thickness = 2
+    FOVCircle.NumSides = 64
+    FOVCircle.Radius = Settings.Aimbot.FOV
+    FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+    FOVCircle.Transparency = 0.5
+    FOVCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+end
+
+createFOVCircle()
+
+local function updateFOVCircle()
+    if FOVCircle then
+        FOVCircle.Visible = Settings.Aimbot.ShowFOV and Settings.Aimbot.Enabled
+        FOVCircle.Radius = Settings.Aimbot.FOV
+        FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+        FOVCircle.Color = currentTarget and Color3.fromRGB(255, 0, 0) or Color3.fromRGB(255, 255, 255)
+    end
+end
+
+-- Player management
+Players.PlayerAdded:Connect(function(player)
+    createESP(player)
+    createChams(player)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removeESP(player)
+    removeChams(player)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        createESP(player)
+        createChams(player)
+    end
+end
+
+-- Main loop
+RunService.RenderStepped:Connect(function()
+    -- Run all systems in parallel without blocking
+    task.spawn(updateESP)
+    task.spawn(updateChams)
+    task.spawn(updateAimbot)
+    task.spawn(updateFOVCircle)
+    
+    -- Auto-click system (optimized)
+    if Settings.AutoClick.Enabled and LocalPlayer.Character then
+        local currentTime = tick()
+        if currentTime - lastClickTime >= Settings.AutoClick.Cooldown then
+            local origin = Camera.CFrame.Position
+            local direction = Camera.CFrame.LookVector * Settings.AutoClick.MaxDistance
+            
+            local raycastParams = RaycastParams.new()
+            raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+            raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+            raycastParams.IgnoreWater = true
+            
+            local rayResult = Workspace:Raycast(origin, direction, raycastParams)
+            
+            if rayResult then
+                local isEnemy = isValidEnemy(rayResult.Instance, Settings.AutoClick.TeamCheck)
+                
+                if isEnemy then
+                    task.spawn(simulateClick)
+                    lastClickTime = currentTime
+                end
+            end
+        end
+    end
+end)
+
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+print("🎮 APEX Combat Script Loaded")
+print("✓ Auto-Click | ✓ ESP | ✓ Aimbot | ✓ Chams")
+print("Press INSERT to open menu")
+print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
